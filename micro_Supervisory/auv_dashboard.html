@@ -1,0 +1,2029 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AUV Control Station</title>
+  <meta name="description"
+    content="Real-time monitoring and control dashboard for AUV — IMU visualization, GPS mapping, sensor telemetry, stepper home position, and manual actuator control." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Leaflet.js for GPS Map Visualization -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <style>
+    /* ============================================================
+       DESIGN TOKENS & RESET
+    ============================================================ */
+    :root {
+      --bg-base: #060b14;
+      --bg-surface: #0d1526;
+      --bg-card: #111d33;
+      --bg-card-alt: #0f1a2e;
+      --border: rgba(0, 200, 255, 0.12);
+      --border-bright: rgba(0, 200, 255, 0.35);
+      --accent-cyan: #00c8ff;
+      --accent-blue: #0084ff;
+      --accent-green: #00e5a0;
+      --accent-orange: #ff8c00;
+      --accent-red: #ff3c5e;
+      --accent-purple: #a855f7;
+      --text-primary: #e8f4ff;
+      --text-secondary: #7ba3c8;
+      --text-muted: #3d5a7a;
+      --glow-cyan: 0 0 20px rgba(0, 200, 255, 0.3);
+      --glow-green: 0 0 20px rgba(0, 229, 160, 0.3);
+      --glow-red: 0 0 20px rgba(255, 60, 94, 0.3);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      font-size: 14px;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background-image:
+        linear-gradient(rgba(0, 200, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 200, 255, 0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+    }
+
+    /* ============================================================
+       LAYOUT
+    ============================================================ */
+    .app {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* ---- TOP BAR ---- */
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 24px;
+      background: rgba(13, 21, 38, 0.95);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+
+    .topbar-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      box-shadow: var(--glow-cyan);
+    }
+
+    .logo-text {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: var(--text-primary);
+    }
+
+    .logo-sub {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .topbar-spacer {
+      flex: 1;
+    }
+
+    /* Packet rate badge */
+    #pkt-rate {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      background: rgba(0, 200, 255, 0.07);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+
+    /* Status pill */
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      font-size: 0.8rem;
+      font-weight: 500;
+      transition: var(--transition);
+    }
+
+    .status-pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: var(--transition);
+    }
+
+    .status-pill.connected {
+      border-color: rgba(0, 229, 160, 0.4);
+      color: var(--accent-green);
+    }
+
+    .status-pill.connected .dot {
+      background: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+      animation: pulse-dot 1.5s ease-in-out infinite;
+    }
+
+    .status-pill.error {
+      border-color: rgba(255, 60, 94, 0.4);
+      color: var(--accent-red);
+    }
+
+    .status-pill.error .dot {
+      background: var(--accent-red);
+      box-shadow: 0 0 8px var(--accent-red);
+    }
+
+    @keyframes pulse-dot {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.5;
+        transform: scale(0.8);
+      }
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 18px;
+      border-radius: var(--radius-sm);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: var(--transition);
+      letter-spacing: 0.02em;
+      user-select: none;
+    }
+
+    .btn-cyan {
+      background: linear-gradient(135deg, rgba(0, 200, 255, 0.15), rgba(0, 132, 255, 0.15));
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .btn-cyan:hover {
+      background: linear-gradient(135deg, rgba(0, 200, 255, 0.28), rgba(0, 132, 255, 0.28));
+      box-shadow: var(--glow-cyan);
+    }
+
+    .btn-red {
+      background: rgba(255, 60, 94, 0.12);
+      border-color: var(--accent-red);
+      color: var(--accent-red);
+    }
+
+    .btn-red:hover {
+      background: rgba(255, 60, 94, 0.22);
+      box-shadow: var(--glow-red);
+    }
+
+    .btn-green {
+      background: rgba(0, 229, 160, 0.12);
+      border-color: var(--accent-green);
+      color: var(--accent-green);
+    }
+
+    .btn-green:hover {
+      background: rgba(0, 229, 160, 0.22);
+      box-shadow: var(--glow-green);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border-color: var(--border);
+      color: var(--text-secondary);
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--border-bright);
+      color: var(--text-primary);
+    }
+
+    .btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .btn-sm {
+      padding: 5px 12px;
+      font-size: 0.75rem;
+    }
+
+    /* ---- MAIN GRID ---- */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      padding: 16px 20px;
+      flex: 1;
+    }
+
+    @media (max-width: 1200px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .col-left,
+    .col-right {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ---- CARDS ---- */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color var(--transition);
+      position: relative;
+    }
+
+    .card:hover {
+      border-color: var(--border-bright);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0, 200, 255, 0.03);
+    }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+    }
+
+    .card-title .icon {
+      font-size: 14px;
+    }
+
+    .card-body {
+      padding: 16px;
+    }
+
+    /* ============================================================
+       3D VIEWPORT
+    ============================================================ */
+    .viz-card {
+      display: flex;
+      flex-direction: column;
+      min-height: 380px;
+    }
+
+    #three-canvas {
+      width: 100%;
+      height: 320px;
+      background: radial-gradient(ellipse at center, #0a1a30 0%, #060b14 70%);
+      display: block;
+    }
+
+    .viz-labels {
+      display: flex;
+      justify-content: space-around;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.3);
+    }
+
+    .viz-label {
+      text-align: center;
+    }
+
+    .viz-label .val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--accent-cyan);
+      display: block;
+    }
+
+    .viz-label .lbl {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    /* ============================================================
+       GPS MAP CARD
+    ============================================================ */
+    .map-card {
+      display: flex;
+      flex-direction: column;
+      min-height: 360px;
+    }
+
+    #gps-map {
+      width: 100%;
+      height: 280px;
+      background: #08111e;
+      position: relative;
+      z-index: 10;
+    }
+
+    .map-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 14px;
+      background: rgba(0, 0, 0, 0.35);
+      border-top: 1px solid var(--border);
+      font-size: 0.75rem;
+    }
+
+    .map-stat {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-secondary);
+    }
+
+    .map-stat span {
+      color: var(--accent-cyan);
+      font-weight: 600;
+    }
+
+    /* Custom Pulsing AUV Marker */
+    .auv-marker-container {
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .auv-marker-pulse {
+      position: absolute;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(0, 200, 255, 0.25);
+      border: 1px solid var(--accent-cyan);
+      animation: marker-pulse 2s infinite ease-out;
+    }
+
+    .auv-marker-icon {
+      width: 22px;
+      height: 22px;
+      background: linear-gradient(135deg, #00c8ff, #0055ff);
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 10px rgba(0, 200, 255, 0.8);
+      transform-origin: center center;
+      transition: transform 0.3s ease;
+    }
+
+    .auv-marker-arrow {
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-bottom: 8px solid #ffffff;
+      margin-top: -2px;
+    }
+
+    @keyframes marker-pulse {
+      0% {
+        transform: scale(0.5);
+        opacity: 1;
+      }
+
+      100% {
+        transform: scale(1.6);
+        opacity: 0;
+      }
+    }
+
+    /* ============================================================
+       IMU GAUGES
+    ============================================================ */
+    .gauges-row {
+      display: flex;
+      gap: 12px;
+      padding: 14px 16px;
+    }
+
+    .gauge-wrap {
+      flex: 1;
+      text-align: center;
+    }
+
+    .gauge-wrap canvas {
+      display: block;
+      margin: 0 auto;
+    }
+
+    .gauge-label {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-top: 4px;
+    }
+
+    .gauge-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    /* ============================================================
+       DATA ROWS (Sensor & Actuator panels)
+    ============================================================ */
+    .data-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 14px 16px;
+    }
+
+    .data-item {}
+
+    .data-item .dk {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 2px;
+    }
+
+    .data-item .dv {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.92rem;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .data-item .dv.good {
+      color: var(--accent-green);
+    }
+
+    .data-item .dv.warn {
+      color: var(--accent-orange);
+    }
+
+    .data-item .dv.bad {
+      color: var(--accent-red);
+    }
+
+    /* ============================================================
+       STEPPER BARS
+    ============================================================ */
+    .stepper-row {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .stepper-item {}
+
+    .stepper-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .stepper-name {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .stepper-pos {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88rem;
+      color: var(--accent-cyan);
+    }
+
+    .step-track {
+      height: 6px;
+      background: rgba(0, 200, 255, 0.08);
+      border-radius: 3px;
+      position: relative;
+      overflow: visible;
+    }
+
+    .step-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
+      transition: width 0.4s ease, transform 0.4s ease;
+      position: absolute;
+      top: 0;
+    }
+
+    .step-center {
+      position: absolute;
+      top: -3px;
+      left: 50%;
+      width: 2px;
+      height: 12px;
+      background: var(--border-bright);
+      transform: translateX(-50%);
+    }
+
+    /* BTS bar */
+    .bts-row {
+      padding: 0 16px 14px;
+    }
+
+    .bts-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .bts-name {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .bts-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88rem;
+      color: var(--accent-orange);
+    }
+
+    .bts-track {
+      height: 8px;
+      background: rgba(255, 140, 0, 0.08);
+      border-radius: 4px;
+      position: relative;
+    }
+
+    .bts-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(90deg, var(--accent-orange), #ffcc00);
+      transition: width 0.3s ease, left 0.3s ease;
+      position: absolute;
+      top: 0;
+    }
+
+    .bts-center {
+      position: absolute;
+      top: -2px;
+      left: 50%;
+      width: 2px;
+      height: 12px;
+      background: var(--border-bright);
+      transform: translateX(-50%);
+    }
+
+    /* ============================================================
+       MODE SWITCHER + HOME BUTTONS
+    ============================================================ */
+    .control-bar {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 14px 20px;
+      background: var(--bg-card-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    .mode-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+
+    /* Mode toggle */
+    .mode-toggle {
+      display: flex;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .mode-btn {
+      padding: 8px 24px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: var(--transition);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: transparent;
+      color: var(--text-muted);
+    }
+
+    .mode-btn.active-auto {
+      background: rgba(0, 229, 160, 0.18);
+      color: var(--accent-green);
+    }
+
+    .mode-btn.active-manual {
+      background: rgba(168, 85, 247, 0.18);
+      color: var(--accent-purple);
+    }
+
+    .mode-btn:not(.active-auto):not(.active-manual):hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-secondary);
+    }
+
+    .sep {
+      width: 1px;
+      height: 28px;
+      background: var(--border);
+    }
+
+    .ctrl-spacer {
+      flex: 1;
+    }
+
+    /* ============================================================
+       MANUAL CONTROL PANEL
+    ============================================================ */
+    .manual-panel {
+      grid-column: 1 / -1;
+      display: none;
+      animation: fadeSlide 0.3s ease;
+    }
+
+    .manual-panel.visible {
+      display: block;
+    }
+
+    @keyframes fadeSlide {
+      from {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .manual-body {
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 900px) {
+      .manual-body {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .ctrl-group {}
+
+    .ctrl-group-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    .ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 6px;
+      background: rgba(0, 200, 255, 0.1);
+      border-radius: 3px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent-cyan);
+      box-shadow: 0 0 8px rgba(0, 200, 255, 0.5);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    input[type="range"].thruster::-webkit-slider-thumb {
+      background: var(--accent-orange);
+      box-shadow: 0 0 8px rgba(255, 140, 0, 0.5);
+    }
+
+    .num-input {
+      width: 72px;
+      padding: 5px 8px;
+      background: rgba(0, 200, 255, 0.06);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      text-align: right;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+
+    .num-input:focus {
+      border-color: var(--accent-cyan);
+    }
+
+    .num-input.thruster {
+      width: 60px;
+    }
+
+    /* ============================================================
+       DATA LOG
+    ============================================================ */
+    .log-panel {
+      grid-column: 1 / -1;
+    }
+
+    .log-body {
+      height: 140px;
+      overflow-y: auto;
+      padding: 10px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      line-height: 1.7;
+      color: var(--text-secondary);
+      background: rgba(0, 0, 0, 0.25);
+    }
+
+    .log-body::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .log-body::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .log-body::-webkit-scrollbar-thumb {
+      background: var(--border-bright);
+      border-radius: 2px;
+    }
+
+    .log-line {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .log-line.sensor {
+      color: #5db8ff;
+    }
+
+    .log-line.actuator {
+      color: #a0e0c0;
+    }
+
+    .log-line.ack {
+      color: #ffe080;
+    }
+
+    .log-line.err {
+      color: var(--accent-red);
+    }
+
+    .log-ts {
+      color: var(--text-muted);
+      margin-right: 6px;
+    }
+
+    /* GPS valid badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+
+    .badge-ok {
+      background: rgba(0, 229, 160, 0.15);
+      color: var(--accent-green);
+    }
+
+    .badge-no {
+      background: rgba(255, 60, 94, 0.12);
+      color: var(--accent-red);
+    }
+
+    /* Warning overlay for manual mode */
+    .manual-badge {
+      padding: 4px 12px;
+      border-radius: 20px;
+      background: rgba(168, 85, 247, 0.15);
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      color: var(--accent-purple);
+      font-size: 0.75rem;
+      font-weight: 600;
+      animation: pulse-badge 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-badge {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.3);
+      }
+
+      50% {
+        box-shadow: 0 0 0 6px rgba(168, 85, 247, 0);
+      }
+    }
+
+    /* Custom Leaflet Map Dark Styling */
+    .leaflet-container {
+      background: #060b14 !important;
+      font-family: 'Inter', sans-serif !important;
+    }
+
+    .leaflet-bar {
+      border: 1px solid var(--border) !important;
+      box-shadow: none !important;
+      border-radius: var(--radius-sm) !important;
+      overflow: hidden;
+    }
+
+    .leaflet-bar a {
+      background-color: var(--bg-card) !important;
+      color: var(--text-primary) !important;
+      border-bottom: 1px solid var(--border) !important;
+    }
+
+    .leaflet-bar a:hover {
+      background-color: rgba(0, 200, 255, 0.2) !important;
+      color: var(--accent-cyan) !important;
+    }
+
+    .leaflet-popup-content-wrapper,
+    .leaflet-popup-tip {
+      background: var(--bg-card) !important;
+      color: var(--text-primary) !important;
+      border: 1px solid var(--border-bright) !important;
+      border-radius: var(--radius-sm) !important;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+
+    <!-- ======================================================
+       TOP BAR
+  ====================================================== -->
+    <header class="topbar">
+      <div class="topbar-logo">
+        <div class="logo-icon">🤿</div>
+        <div>
+          <div class="logo-text">AUV Control Station</div>
+          <div class="logo-sub">ESP-NOW · CAN Bus · Real-time</div>
+        </div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span id="pkt-rate">— pkt/s</span>
+      <div id="status-pill" class="status-pill">
+        <div class="dot"></div>
+        <span id="status-text">Disconnected</span>
+      </div>
+      <button id="btn-connect" class="btn btn-cyan" onclick="toggleConnect()">
+        ⚡ Connect Serial
+      </button>
+    </header>
+
+    <!-- ======================================================
+       MAIN GRID
+  ====================================================== -->
+    <div class="main-grid">
+
+      <!-- ======================================================
+         LEFT COLUMN (3D Visualizer & GPS Map)
+    ====================================================== -->
+      <div class="col-left">
+
+        <!-- 3D VISUALIZER -->
+        <div class="card viz-card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon">🧭</span> AUV Orientation</div>
+            <span id="imu-valid-badge" class="badge badge-no">IMU —</span>
+          </div>
+          <canvas id="three-canvas"></canvas>
+          <div class="viz-labels">
+            <div class="viz-label">
+              <span class="val" id="v-pitch">0.00°</span>
+              <span class="lbl">Pitch</span>
+            </div>
+            <div class="viz-label">
+              <span class="val" id="v-roll">0.00°</span>
+              <span class="lbl">Roll</span>
+            </div>
+            <div class="viz-label">
+              <span class="val" id="v-yaw">0.00°</span>
+              <span class="lbl">Yaw</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- GPS NAVIGATION & TRACKING MAP -->
+        <div class="card map-card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon">🗺️</span> GPS Trajectory & Map</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="recenterMap()" title="Center view on AUV">🎯
+                Recenter</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearGpsTrack()" title="Clear track history">↺ Clear
+                Track</button>
+              <span id="gps-status-badge" class="badge badge-no">GPS NO FIX</span>
+            </div>
+          </div>
+          <div id="gps-map"></div>
+          <div class="map-controls">
+            <div class="map-stat">Position: <span id="map-pos-val">0.000000°, 0.000000°</span></div>
+            <div class="map-stat">Track Points: <span id="map-track-count">0</span></div>
+            <div class="map-stat">Heading: <span id="map-heading-val">0.0°</span></div>
+          </div>
+        </div>
+
+      </div><!-- end col-left -->
+
+      <!-- ======================================================
+         RIGHT COLUMN (IMU Gauges, Sensor Data, Actuators)
+    ====================================================== -->
+      <div class="col-right">
+
+        <!-- IMU GAUGES -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon">📐</span> IMU Gauges</div>
+          </div>
+          <div class="gauges-row">
+            <div class="gauge-wrap">
+              <canvas id="g-pitch" width="110" height="70"></canvas>
+              <div class="gauge-val" id="gv-pitch">0.0°</div>
+              <div class="gauge-label">Pitch</div>
+            </div>
+            <div class="gauge-wrap">
+              <canvas id="g-roll" width="110" height="70"></canvas>
+              <div class="gauge-val" id="gv-roll">0.0°</div>
+              <div class="gauge-label">Roll</div>
+            </div>
+            <div class="gauge-wrap">
+              <canvas id="g-yaw" width="110" height="70"></canvas>
+              <div class="gauge-val" id="gv-yaw">0.0°</div>
+              <div class="gauge-label">Yaw</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SENSOR DATA -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon">📡</span> Sensor Data</div>
+            <span id="seq-badge"
+              style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:var(--text-muted)">seq #—</span>
+          </div>
+          <div class="data-grid">
+            <div class="data-item">
+              <div class="dk">Depth</div>
+              <div class="dv" id="d-depth">— mm</div>
+            </div>
+            <div class="data-item">
+              <div class="dk">UW Distance</div>
+              <div class="dv" id="d-dist">— mm</div>
+            </div>
+            <div class="data-item">
+              <div class="dk">Latitude</div>
+              <div class="dv" id="d-lat">—</div>
+            </div>
+            <div class="data-item">
+              <div class="dk">Longitude</div>
+              <div class="dv" id="d-lon">—</div>
+            </div>
+            <div class="data-item">
+              <div class="dk">GPS Fix Status</div>
+              <div class="dv" id="d-gps"><span class="badge badge-no">NO FIX</span></div>
+            </div>
+            <div class="data-item">
+              <div class="dk">Underwater Sonar</div>
+              <div class="dv" id="d-uw"><span class="badge badge-no">OFFLINE</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ACTUATOR STATUS -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon">⚙️</span> Actuator Status</div>
+            <span id="can-badge" class="badge badge-no">CAN —</span>
+          </div>
+          <div class="stepper-row">
+            <!-- Stepper 1: Yaw -->
+            <div class="stepper-item">
+              <div class="stepper-header">
+                <span class="stepper-name">Stepper 1 — Yaw</span>
+                <span class="stepper-pos" id="s1-pos">0 steps</span>
+              </div>
+              <div class="step-track">
+                <div class="step-center"></div>
+                <div class="step-fill" id="s1-fill"
+                  style="width:50%;left:50%;transform:scaleX(0);transform-origin:left"></div>
+              </div>
+            </div>
+            <!-- Stepper 2: Pitch -->
+            <div class="stepper-item">
+              <div class="stepper-header">
+                <span class="stepper-name">Stepper 2 — Pitch</span>
+                <span class="stepper-pos" id="s2-pos">0 steps</span>
+              </div>
+              <div class="step-track">
+                <div class="step-center"></div>
+                <div class="step-fill" id="s2-fill"
+                  style="width:50%;left:50%;transform:scaleX(0);transform-origin:left"></div>
+              </div>
+            </div>
+          </div>
+          <!-- BTS Thruster -->
+          <div class="bts-row">
+            <div class="bts-header">
+              <span class="bts-name">BTS7960 Thruster</span>
+              <span class="bts-val" id="bts-val">0%</span>
+            </div>
+            <div class="bts-track">
+              <div class="bts-center"></div>
+              <div class="bts-fill" id="bts-fill" style="width:0;left:50%"></div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- end col-right -->
+
+      <!-- ======================================================
+         MODE & HOME CONTROLS (full width)
+    ====================================================== -->
+      <div class="control-bar">
+        <span class="mode-label">Mode</span>
+        <div class="mode-toggle">
+          <button id="btn-auto" class="mode-btn active-auto" onclick="setMode('AUTO')">AUTO</button>
+          <button id="btn-manual" class="mode-btn" onclick="setMode('MANUAL')">MANUAL</button>
+        </div>
+        <div class="sep"></div>
+        <span class="mode-label">Home Position</span>
+        <button id="btn-home-yaw" class="btn btn-ghost btn-sm" onclick="setHome('YAW')"
+          title="Reset Stepper 1 (Yaw) step counter to zero">
+          🎯 Set Yaw Home
+        </button>
+        <button id="btn-home-pitch" class="btn btn-ghost btn-sm" onclick="setHome('PITCH')"
+          title="Reset Stepper 2 (Pitch) step counter to zero">
+          🎯 Set Pitch Home
+        </button>
+        <div class="ctrl-spacer"></div>
+        <div id="manual-badge" class="manual-badge" style="display:none">⚠ MANUAL MODE ACTIVE</div>
+      </div>
+
+      <!-- ======================================================
+         MANUAL CONTROL PANEL
+    ====================================================== -->
+      <div id="manual-panel" class="card manual-panel">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🕹️</span> Manual Actuator Control</div>
+          <span style="font-size:0.72rem;color:var(--text-muted)">Commands sent instantly via ESP-NOW</span>
+        </div>
+        <div class="manual-body">
+
+          <!-- Stepper 1: Yaw -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Stepper 1 — Yaw (steps)</div>
+            <div class="ctrl-row">
+              <input type="range" id="sl-s1" min="-2000" max="2000" value="0"
+                oninput="document.getElementById('ni-s1').value=this.value" />
+              <input type="number" id="ni-s1" class="num-input" value="0" min="-2000" max="2000"
+                oninput="document.getElementById('sl-s1').value=this.value" />
+            </div>
+            <div style="margin-top:10px">
+              <button class="btn btn-cyan btn-sm" onclick="sendStepper()">▶ Send Position</button>
+              &nbsp;
+              <button class="btn btn-ghost btn-sm" onclick="resetS1()">↺ Zero</button>
+            </div>
+          </div>
+
+          <!-- Stepper 2: Pitch -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Stepper 2 — Pitch (steps)</div>
+            <div class="ctrl-row">
+              <input type="range" id="sl-s2" min="-2000" max="2000" value="0"
+                oninput="document.getElementById('ni-s2').value=this.value" />
+              <input type="number" id="ni-s2" class="num-input" value="0" min="-2000" max="2000"
+                oninput="document.getElementById('sl-s2').value=this.value" />
+            </div>
+            <div style="margin-top:10px">
+              <button class="btn btn-cyan btn-sm" onclick="sendStepper()">▶ Send Position</button>
+              &nbsp;
+              <button class="btn btn-ghost btn-sm" onclick="resetS2()">↺ Zero</button>
+            </div>
+          </div>
+
+          <!-- BTS Thruster -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">BTS7960 Thruster (%)</div>
+            <div class="ctrl-row">
+              <input type="range" id="sl-bts" class="thruster" min="-100" max="100" value="0"
+                oninput="document.getElementById('ni-bts').value=this.value" />
+              <input type="number" id="ni-bts" class="num-input thruster" value="0" min="-100" max="100"
+                oninput="document.getElementById('sl-bts').value=this.value" />
+            </div>
+            <div style="margin-top:10px">
+              <button class="btn btn-green btn-sm" onclick="sendBTS()">▶ Send Speed</button>
+              &nbsp;
+              <button class="btn btn-red btn-sm" onclick="stopBTS()">■ STOP</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ======================================================
+         DATA LOG
+    ====================================================== -->
+      <div class="card log-panel">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📋</span> Serial Log</div>
+          <button class="btn btn-ghost btn-sm" onclick="clearLog()">Clear</button>
+        </div>
+        <div class="log-body" id="log-body"></div>
+      </div>
+
+    </div><!-- end main-grid -->
+  </div><!-- end app -->
+
+  <!-- ============================================================
+     JAVASCRIPT
+============================================================ -->
+  <script>
+    'use strict';
+
+    // ================================================================
+    // SERIAL & WEBSOCKET STATE
+    // ================================================================
+    let port = null, reader = null, writer = null;
+    let ws = null;
+    let connected = false;
+    let currentMode = 'AUTO';
+    let lineBuffer = '';
+
+    // Auto-connect WebSocket if page served over HTTP / Wi-Fi
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.location.protocol.startsWith('http')) {
+        const wsHost = window.location.hostname || '192.168.4.1';
+        connectWebSocket(`ws://${wsHost}:81`);
+      }
+    });
+
+    function connectWebSocket(url) {
+      log('Connecting to Wi-Fi WebSocket: ' + url, 'ack');
+      ws = new WebSocket(url);
+      ws.onopen = () => {
+        connected = true;
+        setStatus('connected', '● Connected (Wi-Fi)');
+        document.getElementById('btn-connect').textContent = '● Wi-Fi Connected';
+        document.getElementById('btn-connect').className = 'btn btn-green';
+        log('Wi-Fi WebSocket Connected!', 'ack');
+      };
+      ws.onmessage = (evt) => {
+        if (evt.data) handleLine(evt.data.trim());
+      };
+      ws.onclose = () => {
+        if (connected) {
+          connected = false;
+          setStatus('', 'Disconnected');
+          document.getElementById('btn-connect').textContent = '⚡ Connect Serial';
+          document.getElementById('btn-connect').className = 'btn btn-cyan';
+          log('WebSocket disconnected. Reconnecting in 3s...', 'err');
+          setTimeout(() => connectWebSocket(url), 3000);
+        }
+      };
+      ws.onerror = (e) => {
+        log('WebSocket error', 'err');
+      };
+    }
+
+    // Packet rate tracking
+    let pktCount = 0, lastPktRateTime = Date.now();
+    setInterval(() => {
+      const now = Date.now();
+      const rate = (pktCount / ((now - lastPktRateTime) / 1000)).toFixed(1);
+      document.getElementById('pkt-rate').textContent = `${rate} pkt/s`;
+      pktCount = 0;
+      lastPktRateTime = now;
+    }, 1000);
+
+    // ================================================================
+    // SERIAL CONNECT / DISCONNECT
+    // ================================================================
+    async function toggleConnect() {
+      if (connected) {
+        await disconnect();
+      } else {
+        await connect();
+      }
+    }
+
+    async function connect() {
+      if (!navigator.serial) {
+        alert('Web Serial API not supported.\nPlease use Google Chrome 89+ and enable chrome://flags/#enable-experimental-web-platform-features if needed.');
+        return;
+      }
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        const decoder = new TextDecoderStream();
+        port.readable.pipeTo(decoder.writable);
+        reader = decoder.readable.getReader();
+        const encoder = new TextEncoderStream();
+        encoder.readable.pipeTo(port.writable);
+        writer = encoder.writable.getWriter();
+        connected = true;
+        setStatus('connected', '● Connected');
+        document.getElementById('btn-connect').textContent = '⏏ Disconnect';
+        document.getElementById('btn-connect').className = 'btn btn-red';
+        log('Serial port connected at 115200 baud', 'ack');
+        readLoop();
+      } catch (e) {
+        setStatus('error', 'Error');
+        log('Connection error: ' + e.message, 'err');
+      }
+    }
+
+    async function disconnect() {
+      connected = false;
+      try { if (reader) { await reader.cancel(); reader = null; } } catch { }
+      try { if (writer) { await writer.close(); writer = null; } } catch { }
+      try { if (port) { await port.close(); port = null; } } catch { }
+      setStatus('', 'Disconnected');
+      document.getElementById('btn-connect').textContent = '⚡ Connect Serial';
+      document.getElementById('btn-connect').className = 'btn btn-cyan';
+      log('Serial port disconnected.', 'err');
+    }
+
+    async function readLoop() {
+      try {
+        while (connected && reader) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          lineBuffer += value;
+          let nl;
+          while ((nl = lineBuffer.indexOf('\n')) !== -1) {
+            const line = lineBuffer.slice(0, nl).trim();
+            lineBuffer = lineBuffer.slice(nl + 1);
+            if (line.length > 0) handleLine(line);
+          }
+        }
+      } catch (e) {
+        if (connected) log('Read error: ' + e.message, 'err');
+      }
+    }
+
+    // ================================================================
+    // PARSE INCOMING JSON LINES
+    // ================================================================
+    function handleLine(line) {
+      pktCount++;
+      try {
+        const d = JSON.parse(line);
+        if (d.type === 'SENSOR') {
+          updateSensor(d);
+          log(line, 'sensor');
+        } else if (d.type === 'ACTUATOR') {
+          updateActuator(d);
+          log(line, 'actuator');
+        } else if (d.ack) {
+          log(line, 'ack');
+        } else if (d.error) {
+          log(line, 'err');
+        } else if (d.info) {
+          log(line, 'ack');
+        } else {
+          log(line, '');
+        }
+      } catch {
+        log(line, '');
+      }
+    }
+
+    // ================================================================
+    // UPDATE SENSOR & GPS PANEL
+    // ================================================================
+    let sensorState = {
+      pitch: 0, roll: 0, yaw: 0,
+      imuOk: 0, gpsOk: 0, uwOk: 0,
+      depth: 0, dist: 0, lat: 0, lon: 0, seq: 0
+    };
+
+    function updateSensor(d) {
+      // 1. Normalize key names to handle both C++ struct names and JS state names
+      const rawGpsFlag = d.gpsOk !== undefined ? d.gpsOk : (d.gpsValid !== undefined ? d.gpsValid : 0);
+      const hasValidCoords = (d.lat !== 0 && d.lon !== 0 && d.lat !== undefined && d.lon !== undefined);
+      const isGpsFixed = Boolean(rawGpsFlag) || hasValidCoords;
+
+      const normalizedData = {
+        ...d,
+        gpsOk: isGpsFixed ? 1 : 0,
+        imuOk: d.imuOk !== undefined ? d.imuOk : (d.bnoValid !== undefined ? d.bnoValid : 0),
+        uwOk: d.uwOk !== undefined ? d.uwOk : (d.uwValid !== undefined ? d.uwValid : 0)
+      };
+
+      // 2. Merge normalized data into current state
+      sensorState = { ...sensorState, ...normalizedData };
+      const { pitch, roll, yaw, imuOk, gpsOk, uwOk, depth, dist, lat, lon, seq } = sensorState;
+
+      // 3D model orientation
+      setAUVOrientation(pitch, roll, yaw);
+
+      // Labels under 3D canvas
+      document.getElementById('v-pitch').textContent = pitch.toFixed(2) + '°';
+      document.getElementById('v-roll').textContent = roll.toFixed(2) + '°';
+      document.getElementById('v-yaw').textContent = yaw.toFixed(2) + '°';
+
+      // IMU gauges
+      drawGauge('g-pitch', pitch, -90, 90, '#00c8ff');
+      drawGauge('g-roll', roll, -90, 90, '#00c8ff');
+      drawGauge('g-yaw', yaw, 0, 360, '#a855f7');
+      document.getElementById('gv-pitch').textContent = pitch.toFixed(1) + '°';
+      document.getElementById('gv-roll').textContent = roll.toFixed(1) + '°';
+      document.getElementById('gv-yaw').textContent = yaw.toFixed(1) + '°';
+
+      // IMU valid badge
+      const b = document.getElementById('imu-valid-badge');
+      b.textContent = imuOk ? 'IMU OK' : 'IMU —';
+      b.className = 'badge ' + (imuOk ? 'badge-ok' : 'badge-no');
+
+      // Sensor panel text
+      document.getElementById('d-depth').textContent = depth.toFixed(1) + ' mm';
+      document.getElementById('d-dist').textContent = dist.toFixed(1) + ' mm';
+      document.getElementById('d-lat').textContent = (lat !== 0) ? lat.toFixed(6) : '—';
+      document.getElementById('d-lon').textContent = (lon !== 0) ? lon.toFixed(6) : '—';
+
+      // GPS Fix Status UI Badge
+      document.getElementById('d-gps').innerHTML = gpsOk
+        ? '<span class="badge badge-ok">FIXED</span>'
+        : '<span class="badge badge-no">NO FIX</span>';
+
+      // Underwater Sonar Status UI Badge
+      document.getElementById('d-uw').innerHTML = uwOk
+        ? '<span class="badge badge-ok">ONLINE</span>'
+        : '<span class="badge badge-no">OFFLINE</span>';
+
+      document.getElementById('seq-badge').textContent = `seq #${seq}`;
+
+      // Update GPS Map with lat, lon, heading, and fix status
+      updateGpsMap(lat, lon, yaw, gpsOk);
+    }
+
+    // ================================================================
+    // LEAFLET GPS MAP SYSTEM (100% FREE - NO API KEYS REQUIRED)
+    // ================================================================
+    let map = null;
+    let auvMarker = null;
+    let trackPolyline = null;
+    let trackPoints = [];
+    let hasInitialGpsFix = false;
+    let currentTileLayer = null;
+
+    // Free Tile Providers (No API Keys, No Token, No Account Required)
+    const MAP_LAYERS = {
+      osm: {
+        name: '🗺️ OpenStreetMap',
+        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        options: { maxZoom: 19, attribution: '© OpenStreetMap' }
+      },
+      satellite: {
+        name: '🛰️ Esri Satellite',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        options: { maxZoom: 19, attribution: '© Esri Satellite' }
+      },
+      dark: {
+        name: '🌑 Dark Mode',
+        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        options: { maxZoom: 19, subdomains: 'abcd', attribution: '© OpenStreetMap, © CARTO' }
+      }
+    };
+
+    function initGpsMap() {
+      // Default coordinates (e.g. Jakarta / Equator or ocean view until GPS lock)
+      const defaultPos = [-6.200000, 106.816666];
+
+      map = L.map('gps-map', {
+        center: defaultPos,
+        zoom: 16,
+        zoomControl: true,
+        attributionControl: false
+      });
+
+      // Set default tile layer (OpenStreetMap / Esri Satellite - 100% free, zero API key)
+      setMapLayer('osm');
+
+      // Custom Animated AUV Marker with directional arrow
+      const auvIcon = L.divIcon({
+        className: 'custom-auv-icon',
+        html: `
+      <div class="auv-marker-container">
+        <div class="auv-marker-pulse"></div>
+        <div class="auv-marker-icon" id="auv-marker-arrow-wrap">
+          <div class="auv-marker-arrow"></div>
+        </div>
+      </div>
+    `,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+      });
+
+      auvMarker = L.marker(defaultPos, { icon: auvIcon }).addTo(map);
+      auvMarker.bindPopup('<b style="color:#00c8ff">AUV Current Position</b>');
+
+      // Trajectory breadcrumbs polyline
+      trackPolyline = L.polyline([], {
+        color: '#00c8ff',
+        weight: 3,
+        opacity: 0.85,
+        smoothFactor: 1
+      }).addTo(map);
+    }
+
+    function setMapLayer(layerKey) {
+      if (!map || !MAP_LAYERS[layerKey]) return;
+      if (currentTileLayer) {
+        map.removeLayer(currentTileLayer);
+      }
+      const cfg = MAP_LAYERS[layerKey];
+      currentTileLayer = L.tileLayer(cfg.url, cfg.options).addTo(map);
+    }
+
+    function updateGpsMap(lat, lon, yaw, gpsOk) {
+      if (!map) return;
+
+      const statusBadge = document.getElementById('gps-status-badge');
+      const posVal = document.getElementById('map-pos-val');
+      const headingVal = document.getElementById('map-heading-val');
+      const countVal = document.getElementById('map-track-count');
+
+      headingVal.textContent = yaw.toFixed(1) + '°';
+
+      // Rotate directional arrow on map marker
+      const arrowWrap = document.getElementById('auv-marker-arrow-wrap');
+      if (arrowWrap) {
+        arrowWrap.style.transform = `rotate(${yaw}deg)`;
+      }
+
+      if (!gpsOk || (lat === 0 && lon === 0)) {
+        statusBadge.textContent = 'GPS NO FIX';
+        statusBadge.className = 'badge badge-no';
+        return;
+      }
+
+      statusBadge.textContent = 'GPS LOCKED';
+      statusBadge.className = 'badge badge-ok';
+      posVal.textContent = `${lat.toFixed(6)}°, ${lon.toFixed(6)}°`;
+
+      const newLatLng = [lat, lon];
+      auvMarker.setLatLng(newLatLng);
+
+      // Add to track if moved or first point
+      const lastPoint = trackPoints[trackPoints.length - 1];
+      let shouldAdd = false;
+      if (!lastPoint) {
+        shouldAdd = true;
+      } else {
+        // Check distance moved to prevent clutter
+        const dLat = Math.abs(lastPoint[0] - lat);
+        const dLon = Math.abs(lastPoint[1] - lon);
+        if (dLat > 0.00001 || dLon > 0.00001) {
+          shouldAdd = true;
+        }
+      }
+
+      if (shouldAdd) {
+        trackPoints.push(newLatLng);
+        trackPolyline.setLatLngs(trackPoints);
+        countVal.textContent = trackPoints.length;
+      }
+
+      // Auto-center map on first GPS fix
+      if (!hasInitialGpsFix) {
+        hasInitialGpsFix = true;
+        map.setView(newLatLng, 17);
+      }
+    }
+
+    function recenterMap() {
+      if (!map || !auvMarker) return;
+      const pos = auvMarker.getLatLng();
+      map.setView(pos, 17, { animate: true });
+    }
+
+    function clearGpsTrack() {
+      trackPoints = [];
+      if (trackPolyline) {
+        trackPolyline.setLatLngs([]);
+      }
+      document.getElementById('map-track-count').textContent = '0';
+      log('GPS trajectory history cleared.', 'ack');
+    }
+
+    // ================================================================
+    // UPDATE ACTUATOR PANEL
+    // ================================================================
+    const STEP_MAX = 2000; // visual range for stepper bars
+
+    function updateActuator(d) {
+      const { pos1 = 0, pos2 = 0, bts = 0 } = d;
+
+      // Stepper 1 (Yaw)
+      document.getElementById('s1-pos').textContent = pos1 + ' steps';
+      setStepBar('s1-fill', pos1, STEP_MAX);
+
+      // Stepper 2 (Pitch)
+      document.getElementById('s2-pos').textContent = pos2 + ' steps';
+      setStepBar('s2-fill', pos2, STEP_MAX);
+
+      // BTS7960
+      document.getElementById('bts-val').textContent = bts + '%';
+      setBtsBar('bts-fill', bts);
+
+      // CAN badge
+      const b = document.getElementById('can-badge');
+      b.textContent = 'CAN ●'; b.className = 'badge badge-ok';
+    }
+
+    function setStepBar(id, pos, max) {
+      const el = document.getElementById(id);
+      const pct = Math.min(Math.abs(pos) / max * 50, 50); // max 50% from center
+      if (pos >= 0) {
+        el.style.left = '50%';
+        el.style.width = pct + '%';
+        el.style.transformOrigin = 'left';
+      } else {
+        el.style.left = (50 - pct) + '%';
+        el.style.width = pct + '%';
+        el.style.transformOrigin = 'right';
+      }
+    }
+
+    function setBtsBar(id, pct) {
+      const el = document.getElementById(id);
+      const w = Math.abs(pct) / 2; // max 50% from center
+      if (pct >= 0) {
+        el.style.left = '50%'; el.style.width = w + '%';
+      } else {
+        el.style.left = (50 - w) + '%'; el.style.width = w + '%';
+      }
+    }
+
+    // ================================================================
+    // STATUS HELPERS
+    // ================================================================
+    function setStatus(cls, text) {
+      const pill = document.getElementById('status-pill');
+      pill.className = 'status-pill ' + cls;
+      document.getElementById('status-text').textContent = text;
+    }
+
+    // ================================================================
+    // LOG
+    // ================================================================
+    const MAX_LOG = 120;
+    let logLines = [];
+    function log(text, cls = '') {
+      const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+      logLines.push({ ts, text, cls });
+      if (logLines.length > MAX_LOG) logLines.shift();
+      renderLog();
+    }
+    function renderLog() {
+      const body = document.getElementById('log-body');
+      body.innerHTML = logLines.map(l =>
+        `<div class="log-line ${l.cls}"><span class="log-ts">${l.ts}</span>${escHtml(l.text)}</div>`
+      ).join('');
+      body.scrollTop = body.scrollHeight;
+    }
+    function clearLog() { logLines = []; renderLog(); }
+    function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+    // ================================================================
+    // SEND COMMANDS
+    // ================================================================
+    async function sendLine(line) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(line);
+        return;
+      }
+      if (connected && writer) {
+        await writer.write(line + '\n');
+        return;
+      }
+      log('Not connected — command dropped: ' + line, 'err');
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('btn-auto').className = 'mode-btn ' + (mode === 'AUTO' ? 'active-auto' : '');
+      document.getElementById('btn-manual').className = 'mode-btn ' + (mode === 'MANUAL' ? 'active-manual' : '');
+      document.getElementById('manual-panel').classList.toggle('visible', mode === 'MANUAL');
+      document.getElementById('manual-badge').style.display = mode === 'MANUAL' ? 'flex' : 'none';
+      sendLine('MODE:' + mode);
+      log('Mode switched to ' + mode, 'ack');
+    }
+
+    function setHome(axis) {
+      const cmd = 'HOME_' + axis;
+      sendLine(cmd);
+      log('Set Home: ' + axis + ' stepper reset to 0', 'ack');
+    }
+
+    function sendStepper() {
+      const s1 = parseInt(document.getElementById('ni-s1').value) || 0;
+      const s2 = parseInt(document.getElementById('ni-s2').value) || 0;
+      sendLine(`STEPPER:${s1}:${s2}`);
+      log(`Stepper command: S1=${s1} S2=${s2}`, 'ack');
+    }
+
+    function sendBTS() {
+      const spd = parseInt(document.getElementById('ni-bts').value) || 0;
+      sendLine(`BTS:${spd}`);
+      log(`BTS command: ${spd}%`, 'ack');
+    }
+
+    function stopBTS() {
+      document.getElementById('sl-bts').value = 0;
+      document.getElementById('ni-bts').value = 0;
+      sendLine('BTS:0');
+      log('BTS STOP command sent', 'ack');
+    }
+
+    function resetS1() {
+      document.getElementById('sl-s1').value = 0;
+      document.getElementById('ni-s1').value = 0;
+    }
+    function resetS2() {
+      document.getElementById('sl-s2').value = 0;
+      document.getElementById('ni-s2').value = 0;
+    }
+
+    // ================================================================
+    // ARC GAUGE RENDERER (Canvas 2D)
+    // ================================================================
+    function drawGauge(canvasId, value, minVal, maxVal, color) {
+      const c = document.getElementById(canvasId);
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      const W = c.width, H = c.height;
+      const cx = W / 2, cy = H - 8;
+      const r = Math.min(W, H * 1.8) * 0.42;
+      const startAngle = Math.PI;
+      const endAngle = 2 * Math.PI;
+      const range = maxVal - minVal;
+      const frac = Math.max(0, Math.min(1, (value - minVal) / range));
+      const needleAngle = startAngle + frac * Math.PI;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Track (background arc)
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, startAngle, endAngle);
+      ctx.strokeStyle = 'rgba(0,200,255,0.08)';
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // Fill arc
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, startAngle, needleAngle);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 8;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Needle
+      const nx = cx + r * Math.cos(needleAngle);
+      const ny = cy + r * Math.sin(needleAngle);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(nx, ny);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Center dot
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Init gauges to zero
+    drawGauge('g-pitch', 0, -90, 90, '#00c8ff');
+    drawGauge('g-roll', 0, -90, 90, '#00c8ff');
+    drawGauge('g-yaw', 0, 0, 360, '#a855f7');
+
+    // ================================================================
+    // THREE.JS 3D AUV MODEL
+    // ================================================================
+    (function initThree() {
+      const canvas = document.getElementById('three-canvas');
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x060b14, 0.04);
+
+      const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+      camera.position.set(6, 3, 7);
+      camera.lookAt(0, 0, 0);
+
+      // --- LIGHTS ---
+      scene.add(new THREE.AmbientLight(0x102040, 0.8));
+      const dirLight = new THREE.DirectionalLight(0x00c8ff, 1.2);
+      dirLight.position.set(5, 8, 5);
+      dirLight.castShadow = true;
+      scene.add(dirLight);
+      const rimLight = new THREE.DirectionalLight(0x0055ff, 0.5);
+      rimLight.position.set(-4, -2, -4);
+      scene.add(rimLight);
+      const pointLight = new THREE.PointLight(0x00e5a0, 0.6, 20);
+      pointLight.position.set(0, 3, 0);
+      scene.add(pointLight);
+
+      // --- AUV GROUP ---
+      const auvGroup = new THREE.Group();
+      scene.add(auvGroup);
+
+      const matBody = new THREE.MeshPhongMaterial({ color: 0x0a2a4a, specular: 0x00c8ff, shininess: 60 });
+      const matAccent = new THREE.MeshPhongMaterial({ color: 0x00c8ff, emissive: 0x003344, specular: 0xffffff, shininess: 100 });
+      const matFin = new THREE.MeshPhongMaterial({ color: 0x061a30, specular: 0x004466, shininess: 40 });
+      const matGlass = new THREE.MeshPhongMaterial({ color: 0x003355, transparent: true, opacity: 0.6, specular: 0x00ffff, shininess: 200 });
+
+      // Body (main cylinder — oriented along X = forward)
+      const bodyGeom = new THREE.CylinderGeometry(0.38, 0.28, 4.0, 32);
+      const body = new THREE.Mesh(bodyGeom, matBody);
+      body.rotation.z = Math.PI / 2;
+      body.castShadow = true;
+      auvGroup.add(body);
+
+      // Nose cone
+      const noseGeom = new THREE.ConeGeometry(0.38, 1.0, 32);
+      const nose = new THREE.Mesh(noseGeom, matBody);
+      nose.rotation.z = -Math.PI / 2;
+      nose.position.set(2.5, 0, 0);
+      auvGroup.add(nose);
+
+      // Tail cone
+      const tailGeom = new THREE.ConeGeometry(0.28, 0.8, 32);
+      const tail = new THREE.Mesh(tailGeom, matBody);
+      tail.rotation.z = Math.PI / 2;
+      tail.position.set(-2.4, 0, 0);
+      auvGroup.add(tail);
+
+      // Dome (viewport)
+      const domeGeom = new THREE.SphereGeometry(0.22, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+      const dome = new THREE.Mesh(domeGeom, matGlass);
+      dome.position.set(1.4, 0.3, 0);
+      auvGroup.add(dome);
+
+      // Stripe accent
+      const stripeGeom = new THREE.CylinderGeometry(0.385, 0.385, 0.12, 32);
+      [-1.2, 0, 1.2].forEach(x => {
+        const stripe = new THREE.Mesh(stripeGeom, matAccent);
+        stripe.rotation.z = Math.PI / 2;
+        stripe.position.set(x, 0, 0);
+        auvGroup.add(stripe);
+      });
+
+      // Propeller hub
+      const propHub = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.3, 12), matAccent);
+      propHub.rotation.z = Math.PI / 2;
+      propHub.position.set(-2.9, 0, 0);
+      auvGroup.add(propHub);
+
+      // Propeller blades
+      const propGroup = new THREE.Group();
+      propGroup.position.set(-2.9, 0, 0);
+      for (let i = 0; i < 4; i++) {
+        const bladeGeom = new THREE.BoxGeometry(0.06, 0.5, 0.14);
+        const blade = new THREE.Mesh(bladeGeom, matFin);
+        blade.position.y = 0.25;
+        const bGroup = new THREE.Group();
+        bGroup.add(blade);
+        bGroup.rotation.x = (Math.PI / 2) * i;
+        propGroup.add(bGroup);
+      }
+      auvGroup.add(propGroup);
+
+      // Fins (4 planar fins at tail)
+      const finGeom = new THREE.BoxGeometry(0.8, 0.04, 0.6);
+      [[0, 0], [Math.PI / 2, 0]].forEach(([rx, ry]) => {
+        const fin = new THREE.Mesh(finGeom, matFin);
+        fin.rotation.x = rx; fin.position.set(-1.6, 0, 0);
+        auvGroup.add(fin);
+      });
+
+      // --- OCEAN FLOOR GRID ---
+      const gridHelper = new THREE.GridHelper(20, 20, 0x003344, 0x001122);
+      gridHelper.position.y = -2.5;
+      scene.add(gridHelper);
+
+      // --- PARTICLES (bubbles) ---
+      const bubbleCount = 80;
+      const bPositions = new Float32Array(bubbleCount * 3);
+      for (let i = 0; i < bubbleCount; i++) {
+        bPositions[i * 3] = (Math.random() - 0.5) * 14;
+        bPositions[i * 3 + 1] = (Math.random() - 0.5) * 6;
+        bPositions[i * 3 + 2] = (Math.random() - 0.5) * 14;
+      }
+      const bGeo = new THREE.BufferGeometry();
+      bGeo.setAttribute('position', new THREE.BufferAttribute(bPositions, 3));
+      const bMat = new THREE.PointsMaterial({ color: 0x00c8ff, size: 0.06, transparent: true, opacity: 0.4 });
+      const bubbles = new THREE.Points(bGeo, bMat);
+      scene.add(bubbles);
+
+      // --- RESIZE HANDLER ---
+      function resize() {
+        const w = canvas.clientWidth, h = Math.max(canvas.clientHeight, 300);
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+      new ResizeObserver(resize).observe(canvas);
+      resize();
+
+      // --- TARGET ROTATION (smooth interpolation) ---
+      let targetPitch = 0, targetRoll = 0, targetYaw = 0;
+      window.setAUVOrientation = function (pitch, roll, yaw) {
+        targetPitch = THREE.MathUtils.degToRad(pitch);
+        targetRoll = THREE.MathUtils.degToRad(roll);
+        targetYaw = THREE.MathUtils.degToRad(yaw);
+      };
+
+      // --- ANIMATION LOOP ---
+      const clock = new THREE.Clock();
+      function animate() {
+        requestAnimationFrame(animate);
+        const t = clock.getElapsedTime();
+
+        // Smooth rotation interpolation (lerp)
+        auvGroup.rotation.z = THREE.MathUtils.lerp(auvGroup.rotation.z, -targetPitch, 0.06);
+        auvGroup.rotation.x = THREE.MathUtils.lerp(auvGroup.rotation.x, targetRoll, 0.06);
+        auvGroup.rotation.y = THREE.MathUtils.lerp(auvGroup.rotation.y, -targetYaw, 0.06);
+
+        // Gentle bob when IMU is idle
+        auvGroup.position.y = Math.sin(t * 0.5) * 0.08;
+
+        // Spin propeller
+        propGroup.rotation.x += 0.08;
+
+        // Bubble drift
+        const pos = bGeo.attributes.position.array;
+        for (let i = 0; i < bubbleCount; i++) {
+          pos[i * 3 + 1] += 0.008;
+          if (pos[i * 3 + 1] > 4) pos[i * 3 + 1] = -4;
+        }
+        bGeo.attributes.position.needsUpdate = true;
+
+        // Pulsing accent light
+        pointLight.intensity = 0.5 + 0.15 * Math.sin(t * 2);
+
+        renderer.render(scene, camera);
+      }
+      animate();
+    })();
+
+    // ================================================================
+    // INIT SYSTEMS
+    // ================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      initGpsMap();
+    });
+
+    log('AUV Control Station ready. Click "Connect Serial" to begin.', 'ack');
+    log('GPS Mapping initialized with Dark Matter navigation tiles.', '');
+  </script>
+</body>
+
+</html>
