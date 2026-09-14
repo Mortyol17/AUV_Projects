@@ -241,11 +241,11 @@ The embedded Web Ground Control Station GUI is contained within [`dashboard_html
 
 ```mermaid
 graph TD
-    A[Normal Operation: CAN Bus + ESP-NOW Active] --> B{CAN Bus Disrupted?}
-    B -- Yes --> C[Supervisory Switches to ESP-NOW Fallback]
-    C --> D[Actuator Watchdog Timed Out? >2s]
-    D -- Yes --> E[Actuator Disengages BTS7960 Main Thruster]
-    B -- No --> F[Continue Normal Deterministic CAN Loop]
+    A["Normal Operation: CAN Bus + ESP-NOW Active"] --> B{"CAN Bus Disrupted?"}
+    B -- Yes --> C["Supervisory Switches to ESP-NOW Fallback"]
+    C --> D["Actuator Watchdog Timed Out? (>2s)"]
+    D -- Yes --> E["Actuator Disengages BTS7960 Main Thruster"]
+    B -- No --> F["Continue Normal Deterministic CAN Loop"]
 ```
 
 ---
