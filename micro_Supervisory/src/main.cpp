@@ -152,8 +152,8 @@ volatile bool newBridgeCommand = false;
 // Broadcast peer (FF:FF:FF:FF:FF:FF)
 uint8_t broadcastMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-// SD Log file
-const char* LOG_FILENAME = "/datalog.csv";
+// SD Log file (Auto-incremented on each power cycle)
+char currentLogFilename[32] = "/log_001.csv";
 
 // System Status Enum for LED
 enum SystemLEDState {
@@ -241,32 +241,65 @@ void updateLEDStatus()
 }
 
 // =====================================================
-// USB MASS STORAGE CALLBACKS
+// USB MASS STORAGE CALLBACKS & AUTO-SAFETY TRACKING
 // =====================================================
+static volatile uint32_t lastMscAccessTime = 0;
+
 static int32_t onMscRead(uint32_t lba, uint32_t offset, void* buffer, uint32_t bufsize)
 {
     if (!sdInitialized) return -1;
-    return SD.readRAW((uint8_t*)buffer, lba) ? bufsize : -1;
+    lastMscAccessTime = millis();
+
+    uint32_t sectorSize = SD.sectorSize();
+    if (sectorSize == 0) sectorSize = 512;
+    uint32_t count = bufsize / sectorSize;
+    uint8_t* ptr = (uint8_t*)buffer;
+
+    for (uint32_t i = 0; i < count; i++) {
+        if (!SD.readRAW(ptr + (i * sectorSize), lba + i)) {
+            return -1;
+        }
+    }
+    return bufsize;
 }
+
 static int32_t onMscWrite(uint32_t lba, uint32_t offset, uint8_t* buffer, uint32_t bufsize)
 {
     if (!sdInitialized) return -1;
-    return SD.writeRAW(buffer, lba) ? bufsize : -1;
+    lastMscAccessTime = millis();
+
+    uint32_t sectorSize = SD.sectorSize();
+    if (sectorSize == 0) sectorSize = 512;
+    uint32_t count = bufsize / sectorSize;
+
+    for (uint32_t i = 0; i < count; i++) {
+        if (!SD.writeRAW(buffer + (i * sectorSize), lba + i)) {
+            return -1;
+        }
+    }
+    return bufsize;
 }
 static bool onMscStartStop(uint8_t power_condition, bool start, bool load_eject) { return true; }
 
 void setupUSBMSC()
 {
-    if (!sdInitialized) return;
+    if (!sdInitialized) {
+        Serial.println("[WARN] SD not initialized. USB MSC skipped.");
+        return;
+    }
     msc.vendorID("ESP32-S3");
     msc.productID("AUV Logger");
     msc.productRevision("2.0");
     msc.onRead(onMscRead);
     msc.onWrite(onMscWrite);
     msc.onStartStop(onMscStartStop);
-    msc.begin(SD.numSectors(), SD.sectorSize());
+    msc.mediaPresent(true);
+    uint32_t sectors = SD.numSectors();
+    uint32_t sectorSize = SD.sectorSize();
+    msc.begin(sectors, sectorSize);
     USB.begin();
-    Serial.println("[OK] USB Mass Storage Ready.");
+    Serial.printf("[OK] USB Mass Storage Ready. Sectors: %u (Size: %llu MB)\n", 
+                  sectors, (uint64_t)SD.cardSize() / (1024 * 1024));
 }
 
 // =====================================================
@@ -341,12 +374,21 @@ void setupSD()
     sdInitialized = true;
     Serial.println("[OK] MicroSD Card Ready.");
 
-    if (!SD.exists(LOG_FILENAME)) {
-        File logFile = SD.open(LOG_FILENAME, FILE_WRITE);
-        if (logFile) {
-            logFile.println("uptime_ms,source,sequence,depth_mm,uw_distance_mm,lat,lng,alt_m,speed_kmh,pitch,roll,yaw,sats,gps_valid,bno_valid,uw_valid");
-            logFile.close();
+    // Find next unused log filename (e.g. /log_001.csv, /log_002.csv, /log_003.csv...)
+    for (uint16_t i = 1; i <= 9999; i++) {
+        snprintf(currentLogFilename, sizeof(currentLogFilename), "/log_%03u.csv", i);
+        if (!SD.exists(currentLogFilename)) {
+            break;
         }
+    }
+
+    File logFile = SD.open(currentLogFilename, FILE_WRITE);
+    if (logFile) {
+        logFile.println("uptime_ms,source,sequence,depth_mm,uw_distance_mm,lat,lng,alt_m,speed_kmh,pitch,roll,yaw,sats,gps_valid,bno_valid,uw_valid");
+        logFile.close();
+        Serial.printf("[OK] Created new log file: %s\n", currentLogFilename);
+    } else {
+        Serial.println("[ERROR] Failed to create new log file!");
     }
 }
 
@@ -375,8 +417,14 @@ void setupTWAI()
 void logDataToSD(const SensorPacket& pkt, const char* source)
 {
     if (!sdInitialized) return;
+
+    // Auto-Safety: Pause MCU SD writes if PC is actively accessing USB MSC
+    if (lastMscAccessTime > 0 && (millis() - lastMscAccessTime < 3000)) {
+        return;
+    }
+
     if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        File logFile = SD.open(LOG_FILENAME, FILE_APPEND);
+        File logFile = SD.open(currentLogFilename, FILE_APPEND);
         if (logFile) {
             logFile.printf("%lu,%s,%lu,%.2f,%.2f,%.6f,%.6f,%.2f,%.2f,%.2f,%.2f,%.2f,%lu,%u,%u,%u\n",
                 millis(), source, pkt.sequence,
