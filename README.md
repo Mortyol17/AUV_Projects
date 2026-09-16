@@ -23,7 +23,7 @@ graph TD
 
     subgraph Node 3: Supervisory Flight Computer [micro_Supervisory]
         SUP["Supervisory ESP32-S3<br/>(FreeRTOS Dual-Core Router)"]
-        SD["MicroSD Logger<br/>(/datalog.csv)"]
+        SD["MicroSD Logger<br/>(/log_XXX.csv)"]
         USB_MSC["USB Mass Storage<br/>(Direct PC Sector Access)"]
         SUP --- SD
         SUP --- USB_MSC
@@ -131,8 +131,8 @@ graph TD
 | `systemMonitorTask` | 1 (Lowest) | Core 0 | 3072 B | Watchdog feeder and LED status state machine. |
 
 > [!TIP]
-> **USB Mass Storage Device (MSC) Subsystem**:
-> `micro_Supervisory` implements native USB Mass Storage (`USBMSC` class). When connected via USB to a PC, external OS drivers execute raw sector reads/writes (`onMscRead`, `onMscWrite`) directly to the MicroSD card over FSPI SPI (`CS: 6`, `SCK: 7`, `MOSI: 15`, `MISO: 16`), allowing direct drag-and-drop log extraction without removing hardware.
+> **USB Mass Storage Device (MSC) Subsystem & Auto-Safety Lock**:
+> `micro_Supervisory` implements native USB Mass Storage (`USBMSC` class). When connected via USB to a PC, external OS drivers execute raw sector reads/writes (`onMscRead`, `onMscWrite`) directly to the MicroSD card over FSPI SPI (`CS: 6`, `SCK: 7`, `MOSI: 15`, `MISO: 16`). An auto-safety interlock (`lastMscAccessTime`) pauses MCU SD writes for 3 seconds whenever host PC sector activity occurs, preventing FAT filesystem corruption. Logs auto-increment per session (`/log_001.csv`, `/log_002.csv`...).
 
 ---
 
@@ -152,7 +152,27 @@ graph TD
 
 ---
 
-## 3. Telemetry & Messaging Specification
+## 3. Node LED Diagnostics Matrix (GPIO 48 RGB NeoPixel)
+
+Each node features a native WS2812B RGB NeoPixel connected to **GPIO 48** for non-blocking visual hardware diagnostics:
+
+| Node | LED Color & Pattern | System State / Condition | Operational Meaning |
+| :--- | :--- | :--- | :--- |
+| **`micro_Sensor`** | **Solid RGB Boot Test / Off** | Setup Complete / Idle Loop | System initialized; sensor acquisition loop active. |
+| **`micro_Actuator`** | **Green Heartbeat** (500ms toggle) | `canConnected == true` | CAN bus online & healthy; motor control active. |
+| **`micro_Actuator`** | **Fast Red Blink** (70ms toggle) | `canConnected == false` | CAN offline / timeout ($>2\text{s}$); main thruster stopped. |
+| **`micro_Supervisory`** | **Green Flash** (1s cycle, 50ms pulse) | `LED_STATE_OK_CAN` | System operating normally via TWAI CAN bus. |
+| **`micro_Supervisory`** | **Blue Flash** (1s cycle, 50ms pulse) | `LED_STATE_OK_ESPNOW` | CAN down ($>3\text{s}$); active on ESP-NOW wireless fallback. |
+| **`micro_Supervisory`** | **Fast Red Pattern** (100ms burst, 1s rest) | `LED_STATE_ERR_CAN_TIMEOUT` | Critical connection timeout (neither CAN nor ESP-NOW healthy). |
+| **`micro_Supervisory`** | **Blinking White** (500ms toggle) | `LED_STATE_ERR_SD_FAIL` | MicroSD card initialization or mount failure. |
+| **`Testing` (Bridge)** | **Cyan Flash** (30ms pulse) | Packet RX (`BPKT_SENSOR` / Raw) | Sensor telemetry packet received over ESP-NOW. |
+| **`Testing` (Bridge)** | **Green/Yellow Flash** (30ms pulse) | Packet RX (`BPKT_ACTUATOR`) | Actuator status report packet received over ESP-NOW. |
+| **`Testing` (Bridge)** | **Purple/Magenta Flash** (30ms pulse) | Packet TX (`BPKT_COMMAND`) | Control command packet transmitted over ESP-NOW to vehicle. |
+| **`Testing` (Bridge)** | **Pulsing Red Error** (150ms pulse, 1.5s) | Packet Error / Corrupted | Mismatched packet length, header error, or corrupted data. |
+
+---
+
+## 4. Telemetry & Messaging Specification
 
 ### A. CAN Bus Message Dictionary (500 kbps)
 
@@ -224,7 +244,7 @@ struct __attribute__((packed)) BridgeCommandPkt {
 
 ---
 
-## 4. Ground Control Station Web Dashboard Engine
+## 5. Ground Control Station Web Dashboard Engine
 
 The embedded Web Ground Control Station GUI is contained within [`dashboard_html.h`](file:///c:/Users/MP2KC/OneDrive/Documents/PlatformIO/Projects/Testing/src/dashboard_html.h) (and standalone [`auv_dashboard.html`](file:///c:/Users/MP2KC/OneDrive/Documents/PlatformIO/Projects/micro_Supervisory/auv_dashboard.html)).
 
@@ -237,7 +257,7 @@ The embedded Web Ground Control Station GUI is contained within [`dashboard_html
 
 ---
 
-## 5. System Fail-Safe & Reliability Analysis
+## 6. System Fail-Safe & Reliability Analysis
 
 ```mermaid
 graph TD
@@ -250,9 +270,9 @@ graph TD
 
 ---
 
-## 6. MicroSD Data Logging Schema
+## 7. MicroSD Data Logging Schema
 
-Data is logged asynchronously in CSV format to `/datalog.csv`:
+Data is logged asynchronously in CSV format to `/log_XXX.csv` (e.g., `/log_001.csv`, `/log_002.csv`):
 ```csv
 uptime_ms,source,sequence,depth_mm,uw_distance_mm,lat,lng,alt_m,speed_kmh,pitch,roll,yaw,sats,gps_valid,bno_valid,uw_valid
 15420,CAN,142,1250.5,842.0,-6.175412,106.827154,12.5,0.4,2.15,-0.85,142.30,8,1,1,1
@@ -260,9 +280,9 @@ uptime_ms,source,sequence,depth_mm,uw_distance_mm,lat,lng,alt_m,speed_kmh,pitch,
 
 ---
 
-## 7. Quick Start Operational Checklist
+## 8. Quick Start Operational Checklist
 
-1. Power on all four ESP32-S3 nodes. Verify status LEDs glow steady **Green**.
+1. Power on all four ESP32-S3 nodes. Verify status LEDs glow steady **Green** (or flash Green pulse).
 2. Connect PC/Mobile device to Wi-Fi Access Point:
    * **SSID**: `AUV-Control-Station`
    * **Password**: `12345678`
