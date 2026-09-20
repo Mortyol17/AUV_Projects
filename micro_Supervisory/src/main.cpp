@@ -448,9 +448,19 @@ void forwardCommandToCAN(const BridgeCommandPkt& cmd)
         return;
     }
 
+    // Auto-recover if TWAI enters BUS_OFF state
+    twai_status_info_t status;
+    if (twai_get_status_info(&status) == ESP_OK && status.state == TWAI_STATE_BUS_OFF) {
+        Serial.println("[TWAI] BUS_OFF detected on Supervisory TX! Initiating recovery...");
+        twai_initiate_recovery();
+        vTaskDelay(pdMS_TO_TICKS(10));
+        twai_start();
+    }
+
     twai_message_t txMsg = {};
     txMsg.extd = 0;
     txMsg.rtr  = 0;
+    esp_err_t res = ESP_FAIL;
 
     switch (cmd.cmdType) {
         case CMD_STEPPER: {
@@ -458,7 +468,7 @@ void forwardCommandToCAN(const BridgeCommandPkt& cmd)
             txMsg.data_length_code = 8;
             memcpy(&txMsg.data[0], &cmd.s1, sizeof(int32_t));
             memcpy(&txMsg.data[4], &cmd.s2, sizeof(int32_t));
-            twai_transmit(&txMsg, pdMS_TO_TICKS(10));
+            res = twai_transmit(&txMsg, pdMS_TO_TICKS(10));
             Serial.printf("[CAN TX] STEPPER -> S1=%ld S2=%ld\n", (long)cmd.s1, (long)cmd.s2);
             break;
         }
@@ -466,7 +476,7 @@ void forwardCommandToCAN(const BridgeCommandPkt& cmd)
             txMsg.identifier       = 0x201;
             txMsg.data_length_code = 1;
             txMsg.data[0]          = (uint8_t)cmd.btsSpeed;
-            twai_transmit(&txMsg, pdMS_TO_TICKS(10));
+            res = twai_transmit(&txMsg, pdMS_TO_TICKS(10));
             Serial.printf("[CAN TX] BTS -> Speed=%d%%\n", cmd.btsSpeed);
             break;
         }
@@ -475,7 +485,7 @@ void forwardCommandToCAN(const BridgeCommandPkt& cmd)
             txMsg.identifier       = 0x203;
             txMsg.data_length_code = 1;
             txMsg.data[0]          = 0x01;
-            twai_transmit(&txMsg, pdMS_TO_TICKS(10));
+            res = twai_transmit(&txMsg, pdMS_TO_TICKS(10));
             latestActuatorPkt.pos1 = 0; // Reset local tracking
             Serial.println("[CAN TX] HOME -> Stepper 1 (Yaw) reset to 0");
             break;
@@ -485,19 +495,25 @@ void forwardCommandToCAN(const BridgeCommandPkt& cmd)
             txMsg.identifier       = 0x203;
             txMsg.data_length_code = 1;
             txMsg.data[0]          = 0x02;
-            twai_transmit(&txMsg, pdMS_TO_TICKS(10));
+            res = twai_transmit(&txMsg, pdMS_TO_TICKS(10));
             latestActuatorPkt.pos2 = 0; // Reset local tracking
             Serial.println("[CAN TX] HOME -> Stepper 2 (Pitch) reset to 0");
             break;
         }
         case CMD_MODE: {
             // Mode is software-only — no CAN command needed
+            res = ESP_OK;
             Serial.printf("[MODE] Switched to %s\n", cmd.mode ? "MANUAL" : "AUTO");
             break;
         }
         default:
             Serial.printf("[WARN] Unknown command type: %d\n", cmd.cmdType);
             break;
+    }
+
+    if (res == ESP_OK) {
+        lastCanRxTime = millis();
+        canOnline     = true;
     }
 }
 
@@ -512,7 +528,17 @@ void canTask(void *pvParameters)
     static SensorPacket canPkt = {};
 
     for (;;) {
-        if (twaiInitialized && twai_receive(&rxMsg, pdMS_TO_TICKS(5)) == ESP_OK) {
+        if (twaiInitialized) {
+            // Auto-recover if TWAI enters BUS_OFF state
+            twai_status_info_t status;
+            if (twai_get_status_info(&status) == ESP_OK && status.state == TWAI_STATE_BUS_OFF) {
+                Serial.println("[TWAI] BUS_OFF detected on Supervisory RX! Initiating recovery...");
+                twai_initiate_recovery();
+                vTaskDelay(pdMS_TO_TICKS(10));
+                twai_start();
+            }
+
+            if (twai_receive(&rxMsg, pdMS_TO_TICKS(5)) == ESP_OK) {
 
             lastCanRxTime = millis();
 
@@ -587,6 +613,7 @@ void canTask(void *pvParameters)
                 strncpy(msg.source, "CAN", sizeof(msg.source));
                 xQueueSend(sdLogQueue, &msg, 0);
             }
+        }
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));

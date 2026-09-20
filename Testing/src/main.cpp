@@ -1,16 +1,11 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WebServer.h>
-#include <WebSocketsServer.h>
 #include <esp_now.h>
 #include <esp_idf_version.h>
-#include "dashboard_html.h"
+
 
 // =====================================================
-// AUV BRIDGE ESP32 FIRMWARE WITH DUAL USB-SERIAL & WI-FI DASHBOARD
-// Wi-Fi Access Point SSID: AUV-Control-Station
-// Wi-Fi Password:        12345678
-// Dashboard URL:         http://192.168.4.1
+// AUV BRIDGE ESP32 FIRMWARE — DUAL USB-SERIAL TO ESP-NOW BRIDGE
 // Baud:                  115200
 // =====================================================
 
@@ -166,17 +161,15 @@ uint8_t broadcastMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 String  serialBuffer   = "";
 bool    espNowReady    = false;
 
-WebServer        server(80);
-WebSocketsServer webSocket(81);
+
 
 // Forward declarations
 void parseSerialCommand(const String& line);
 
-// Broadcast telemetry JSON over USB Serial + Wi-Fi WebSocket
+// Broadcast telemetry JSON over USB Serial
 void broadcastJson(const char* jsonStr)
 {
     Serial.println(jsonStr);
-    webSocket.broadcastTXT(jsonStr);
 }
 
 // =====================================================
@@ -316,17 +309,7 @@ void parseSerialCommand(const String& line)
     }
 }
 
-// WebSocket Event Handler
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length)
-{
-    if (type == WStype_TEXT && length > 0) {
-        String cmdStr = String((char*)payload).substring(0, length);
-        cmdStr.trim();
-        if (cmdStr.length() > 0) {
-            parseSerialCommand(cmdStr);
-        }
-    }
-}
+
 
 // =====================================================
 // SETUP
@@ -344,21 +327,9 @@ void setup()
 
     Serial.println("{\"info\":\"AUV Bridge ESP32 — Starting...\"}");
 
-    // Dual Wi-Fi Mode
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP("AUV-Control-Station", "12345678", 1);
-    Serial.printf("{\"info\":\"Wi-Fi AP Active\",\"ssid\":\"AUV-Control-Station\",\"ip\":\"%s\"}\n",
-                  WiFi.softAPIP().toString().c_str());
-
-    // HTTP WebServer
-    server.on("/", []() {
-        server.send_P(200, "text/html", DASHBOARD_HTML);
-    });
-    server.begin();
-
-    // WebSocket Server on Port 81
-    webSocket.begin();
-    webSocket.onEvent(webSocketEvent);
+    // Station Mode (required for ESP-NOW, no AP)
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
 
     // Init ESP-NOW
     if (esp_now_init() != ESP_OK) {
@@ -390,9 +361,7 @@ void loop()
     // Handle non-blocking LED off timeout & error pulsing
     updateLed();
 
-    // Handle HTTP WebServer & WebSockets
-    server.handleClient();
-    webSocket.loop();
+
 
     // Handle USB Serial inputs from Laptop
     while (Serial.available()) {

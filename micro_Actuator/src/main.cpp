@@ -32,7 +32,7 @@
 #define WDT_TIMEOUT_SEC  5     // Watchdog timeout (5 seconds)
 #define PWM_FREQ         20000 // 20 kHz PWM for BTS7960
 #define PWM_RES          8     // 8-bit resolution (0-255)
-#define MIN_STEP_DELAY_US 400  // Minimum delay between stepper steps (microsecond limit for max speed)
+#define MIN_STEP_DELAY_US 1000  // Minimum delay between stepper steps (microsecond limit for max speed)
 
 // =====================================================
 // CAN MESSAGE IDENTIFIERS
@@ -183,6 +183,16 @@ void setupWatchdog() {
 void sendStatusReport() {
     if (!twaiInitialized) return;
 
+    // Auto-recover if TWAI enters BUS_OFF state
+    twai_status_info_t status;
+    if (twai_get_status_info(&status) == ESP_OK && status.state == TWAI_STATE_BUS_OFF) {
+        Serial.println("[TWAI] BUS_OFF detected on Actuator TX! Initiating recovery...");
+        twai_initiate_recovery();
+        vTaskDelay(pdMS_TO_TICKS(10));
+        twai_start();
+        return;
+    }
+
     twai_message_t txMsg;
     txMsg.identifier = CAN_ID_STATUS_REPORT;
     txMsg.extd = 0;
@@ -192,7 +202,7 @@ void sendStatusReport() {
     memcpy(&txMsg.data[0], (void*)&currentPos1, sizeof(int32_t));
     memcpy(&txMsg.data[4], (void*)&currentPos2, sizeof(int32_t));
 
-    twai_transmit(&txMsg, pdMS_TO_TICKS(10));
+    twai_transmit(&txMsg, pdMS_TO_TICKS(25));
 }
 
 // =====================================================
@@ -205,8 +215,18 @@ void canTask(void *pvParameters) {
     uint32_t lastReportTime = 0;
 
     for (;;) {
-        // Check for incoming CAN messages
-        if (twaiInitialized && twai_receive(&rxMsg, pdMS_TO_TICKS(5)) == ESP_OK) {
+        if (twaiInitialized) {
+            // Auto-recover if TWAI enters BUS_OFF state
+            twai_status_info_t status;
+            if (twai_get_status_info(&status) == ESP_OK && status.state == TWAI_STATE_BUS_OFF) {
+                Serial.println("[TWAI] BUS_OFF detected on Actuator RX! Initiating recovery...");
+                twai_initiate_recovery();
+                vTaskDelay(pdMS_TO_TICKS(10));
+                twai_start();
+            }
+
+            // Check for incoming CAN messages
+            if (twai_receive(&rxMsg, pdMS_TO_TICKS(5)) == ESP_OK) {
             lastCanRxTime = millis();
             canConnected = true;
 
@@ -247,6 +267,7 @@ void canTask(void *pvParameters) {
                     break;
                 }
             }
+        }
         }
 
         // Send status feedback every 200 ms
