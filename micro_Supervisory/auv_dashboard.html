@@ -1501,21 +1501,22 @@
     let currentTileLayer = null;
 
     // Free Tile Providers (No API Keys, No Token, No Account Required)
+    // Using OSM community mirrors (Germany/France) which serve tiles freely.
     const MAP_LAYERS = {
       osm: {
         name: '🗺️ OpenStreetMap',
-        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        options: { maxZoom: 19, attribution: '© OpenStreetMap' }
+        url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
+        options: { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }
+      },
+      osmfr: {
+        name: '🇫🇷 OSM France',
+        url: 'https://a.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png',
+        options: { maxZoom: 20, attribution: '&copy; OpenStreetMap France' }
       },
       satellite: {
         name: '🛰️ Esri Satellite',
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        options: { maxZoom: 19, attribution: '© Esri Satellite' }
-      },
-      dark: {
-        name: '🌑 Dark Mode',
-        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-        options: { maxZoom: 19, subdomains: 'abcd', attribution: '© OpenStreetMap, © CARTO' }
+        options: { maxZoom: 19, attribution: '&copy; Esri Satellite' }
       }
     };
 
@@ -1530,7 +1531,7 @@
         attributionControl: false
       });
 
-      // Set default tile layer (OpenStreetMap / Esri Satellite - 100% free, zero API key)
+      // Set default tile layer (OSM Germany mirror - free, no API key required)
       setMapLayer('osm');
 
       // Custom Animated AUV Marker with directional arrow
